@@ -21,7 +21,7 @@ public class GameSession: NSObject, ObservableObject {
     private var advertiser: MCNearbyServiceAdvertiser!
     
     // NEW: This replaces the pop-up. It's the "raw" browser.
-    private var serviceBrowser: MCNearbyServiceBrowser!
+    public var serviceBrowser: MCNearbyServiceBrowser!
     
     private var playerPeerMap: [MCPeerID: UUID] = [:]
 
