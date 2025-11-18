@@ -1,132 +1,97 @@
 import SwiftUI
 
-/// A simple view that displays the current game state.
+// This view just displays the game state.
 public struct BossBattleView: View {
     
-    /// This view "observes" the game state. When the state changes,
-    /// the view automatically updates.
-    @ObservedObject public var gameState: GameState
+    public var gameState: GameState
+    public var localPlayerID: UUID?
+    public var onPlayerAttack: (PlayerMove) -> Void
+    public var onBossAttack: () -> Void
     
-    public init(gameState: GameState) {
+    private var iAmTheBoss: Bool { localPlayerID == gameState.boss.id }
+    private var isBossTurn: Bool { gameState.currentPlayerTurn == gameState.boss.id }
+    
+    public init(gameState: GameState, localPlayerID: UUID?, onPlayerAttack: @escaping (PlayerMove) -> Void, onBossAttack: @escaping () -> Void) {
         self.gameState = gameState
+        self.localPlayerID = localPlayerID
+        self.onPlayerAttack = onPlayerAttack
+        self.onBossAttack = onBossAttack
     }
     
     public var body: some View {
         VStack(spacing: 20) {
-            
-            // --- BOSS ---
             VStack {
-                Text(gameState.boss.name)
-                    .font(.largeTitle.bold())
-                // This is where you would show the boss's imported drawing!
-                Image(systemName: "server.rack")
-                    .font(.system(size: 80))
-                    .padding()
-                
-                Text("Health: \(gameState.boss.health) / 100")
-                    .font(.title2)
+                Text(gameState.boss.name).font(.largeTitle.bold())
+                Image(systemName: "server.rack").font(.system(size: 80)).padding()
+                Text("Health: \(gameState.boss.health) / 100").font(.title2)
                 ProgressView(value: Double(gameState.boss.health), total: 100)
-                    .progressViewStyle(.linear)
             }
-            .padding()
-            .background(Color.red.opacity(0.1))
-            .cornerRadius(15)
+            .padding().background(Color.red.opacity(0.1)).cornerRadius(15)
 
-            // --- GAME MESSAGE ---
-            Text(gameState.gameMessage)
-                .font(.headline)
-                .padding()
-                .frame(maxWidth: .infinity)
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(10)
+            Text(gameState.gameMessage).font(.headline).padding()
+                .frame(maxWidth: .infinity).background(Color.gray.opacity(0.1)).cornerRadius(10)
             
-            // --- PLAYERS ---
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 15) {
                     ForEach(gameState.players) { player in
-                        PlayerView(player: player, gameState: gameState)
+                        PlayerView(
+                            player: player,
+                            isMyTurn: gameState.currentPlayerTurn == player.id,
+                            iAmThisPlayer: localPlayerID == player.id,
+                            onPlayerAttack: onPlayerAttack
+                        )
                     }
                 }
                 .padding()
             }
             
-            // --- BOSS TURN BUTTON ---
-            if gameState.currentPlayerTurn == gameState.boss.id {
-                Button("Boss's Turn") {
-                    gameState.bossAttack()
-                }
-                .font(.title2.bold())
-                .padding()
-                .background(Color.red)
-                .foregroundColor(.white)
-                .cornerRadius(10)
+            if isBossTurn && iAmTheBoss {
+                Button("Boss's Turn") { onBossAttack() }
+                .font(.title2.bold()).padding().background(Color.red)
+                .foregroundColor(.white).cornerRadius(10)
             }
         }
         .padding()
     }
 }
 
-/// A sub-view for a single player
 struct PlayerView: View {
     let player: Player
-    @ObservedObject var gameState: GameState
-    
-    // Check if it's this player's turn
-    var isMyTurn: Bool {
-        gameState.currentPlayerTurn == player.id
-    }
+    let isMyTurn: Bool
+    let iAmThisPlayer: Bool
+    var onPlayerAttack: (PlayerMove) -> Void
     
     var body: some View {
         VStack(spacing: 10) {
-            Text(player.name)
-                .font(.title3.bold())
+            Text(player.name).font(.title3.bold())
             
-            // --- AVATAR ---
-            // This logic tries to load the custom drawing.
-            // If it can't, it shows a default icon.
-            playerAvatar
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 80, height: 80)
-                .clipShape(Circle())
+            playerAvatar.resizable().aspectRatio(contentMode: .fit)
+                .frame(width: 80, height: 80).clipShape(Circle())
                 .background(Circle().fill(Color.blue.opacity(0.1)))
                 .overlay(Circle().stroke(isMyTurn ? Color.yellow : Color.gray, lineWidth: 4))
             
             Text("HP: \(player.health) / 20")
             
-            // --- MOVES ---
-            if isMyTurn {
+            if isMyTurn && iAmThisPlayer {
                 ForEach(player.moves) { move in
-                    Button(move.name) {
-                        // Player attacks!
-                        gameState.playerAttack(playerID: player.id, move: move)
-                    }
-                    .font(.caption)
-                    .buttonStyle(.bordered)
+                    Button(move.name) { onPlayerAttack(move) }
+                    .font(.caption).buttonStyle(.bordered)
                 }
             } else {
-                // Show moves, but disabled
                 ForEach(player.moves) { move in
-                    Text(move.name)
-                        .font(.caption)
-                        .padding(5)
-                        .background(Color.gray.opacity(0.2))
-                        .cornerRadius(5)
+                    Text(move.name).font(.caption).padding(5)
+                    .background(Color.gray.opacity(0.2)).cornerRadius(5)
                 }
             }
         }
-        .padding()
-        .background(Color.blue.opacity(0.1))
-        .cornerRadius(15)
+        .padding().background(Color.blue.opacity(0.1)).cornerRadius(15)
         .shadow(radius: isMyTurn ? 10 : 0)
     }
     
-    /// This helper handles converting the "drawing" Data into an Image
     var playerAvatar: Image {
         if let data = player.customAvatarData, let uiImage = UIImage(data: data) {
             return Image(uiImage: uiImage)
         }
-        // Default placeholder icon
         return Image(systemName: "person.fill")
     }
 }
