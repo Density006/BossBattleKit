@@ -4,22 +4,25 @@ import SwiftUI
 
 public class GameSession: NSObject, ObservableObject {
     
-    // --- Published properties will update our UI ---
+    // --- Published properties ---
     @Published public var currentGameState: GameState?
     @Published public var connectedPeers: [MCPeerID] = []
     @Published public var localPlayerID: UUID?
     @Published public var gameStarted: Bool = false
     @Published public var iAmBoss: Bool = false
     
-    /// This new property will trigger the browser sheet
-    @Published public var isShowingBrowser: Bool = false
+    // NEW: This list will hold hosts we find
+    @Published public var foundPeers: [MCPeerID] = []
     
     // --- Multipeer Properties ---
     private let serviceType = "boss-battle"
     private let myPeerID: MCPeerID
     public var session: MCSession!
     private var advertiser: MCNearbyServiceAdvertiser!
-    public var browser: MCBrowserViewController?
+    
+    // NEW: This replaces the pop-up. It's the "raw" browser.
+    private var serviceBrowser: MCNearbyServiceBrowser!
+    
     private var playerPeerMap: [MCPeerID: UUID] = [:]
 
     public init(playerName: String) {
@@ -45,24 +48,27 @@ public class GameSession: NSObject, ObservableObject {
     
     public func joinGame() {
         self.iAmBoss = false
+        self.foundPeers = [] // Clear old results
+        
         self.session = MCSession(peer: myPeerID, securityIdentity: nil, encryptionPreference: .required)
         self.session.delegate = self
         
-        // Create the browser and show it
-        self.browser = MCBrowserViewController(serviceType: serviceType, session: self.session)
-        self.browser?.delegate = self
-        
-        DispatchQueue.main.async {
-            self.isShowingBrowser = true
-        }
+        // NEW: Instead of a pop-up, we start the "raw" browser
+        self.serviceBrowser = MCNearbyServiceBrowser(peer: myPeerID, serviceType: serviceType)
+        self.serviceBrowser.delegate = self
+        self.serviceBrowser.startBrowsingForPeers()
+    }
+    
+    // NEW: This is called when you tap a host from the list
+    public func invitePeer(_ peerID: MCPeerID) {
+        // Invite the host to our session
+        self.serviceBrowser.invitePeer(peerID, to: self.session, withContext: nil, timeout: 30)
     }
     
     public func sendPlayerAttack(move: PlayerMove) {
-        if let hostPeer = connectedPeers.first(where: { playerPeerMap.keys.contains($0) }) {
+        // This is simplified. We assume the first peer is the host.
+        if let hostPeer = connectedPeers.first {
              sendData(.playerAttack(move), to: [hostPeer])
-        } else if let hostPeer = connectedPeers.first {
-            // Fallback for the very first connection
-            sendData(.playerAttack(move), to: [hostPeer])
         }
     }
     
@@ -84,7 +90,9 @@ public class GameSession: NSObject, ObservableObject {
     
     private func broadcastGameState() {
         guard iAmBoss, let state = currentGameState else { return }
-        sendData(.fullGameState(state), to: connectedPeers)
+        // Send to all *other* peers
+        let playerPeers = connectedPeers.filter { $0 != myPeerID }
+        sendData(.fullGameState(state), to: playerPeers)
     }
     
     private func handleReceivedData(_ data: GameData, from peerID: MCPeerID) {
@@ -119,8 +127,17 @@ extension GameSession: MCSessionDelegate {
         DispatchQueue.main.async {
             switch state {
             case .connected:
-                self.connectedPeers.append(peerID)
+                // Add to list, but avoid duplicates
+                if !self.connectedPeers.contains(peerID) {
+                    self.connectedPeers.append(peerID)
+                }
+                
                 if !self.iAmBoss {
+                    // Stop searching once we're connected
+                    self.serviceBrowser.stopBrowsingForPeers()
+                    self.foundPeers = []
+                    
+                    // Send our player info
                     let player = Player(
                         id: UUID(),
                         name: self.myPeerID.displayName,
@@ -134,7 +151,6 @@ extension GameSession: MCSessionDelegate {
             case .notConnected:
                 self.connectedPeers.removeAll(where: { $0 == peerID })
                 if self.iAmBoss {
-                    // Handle player disconnect
                     if let playerID = self.playerPeerMap[peerID] {
                         self.currentGameState?.players.removeAll(where: { $0.id == playerID })
                         self.playerPeerMap.removeValue(forKey: peerID)
@@ -166,22 +182,28 @@ extension GameSession: MCSessionDelegate {
 
 extension GameSession: MCNearbyServiceAdvertiserDelegate {
     public func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) {
+        // Automatically accept all invitations
         invitationHandler(true, self.session)
     }
 }
 
-extension GameSession: MCBrowserViewControllerDelegate {
-    public func browserViewControllerDidFinish(_ browserViewController: MCBrowserViewController) {
+// NEW: This is the delegate for the "raw" browser
+extension GameSession: MCNearbyServiceBrowserDelegate {
+    
+    // We found a host
+    public func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String : String]?) {
         DispatchQueue.main.async {
-            self.isShowingBrowser = false
+            // Add to our list so the UI can show it
+            if !self.foundPeers.contains(peerID) {
+                self.foundPeers.append(peerID)
+            }
         }
-        browserViewController.dismiss(animated: true)
     }
     
-    public func browserViewControllerWasCancelled(_ browserViewController: MCBrowserViewController) {
+    // A host disappeared
+    public func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
         DispatchQueue.main.async {
-            self.isShowingBrowser = false
+            self.foundPeers.removeAll(where: { $0 == peerID })
         }
-        browserViewController.dismiss(animated: true)
     }
 }
