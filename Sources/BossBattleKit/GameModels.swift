@@ -3,7 +3,7 @@ import Foundation
 // --- All our data models must be "public" and "Codable" ---
 
 public struct PlayerMove: Identifiable, Hashable, Codable {
-    public let id = UUID()
+    public var id = UUID()
     public var name: String
     public var damage: Int
     public var description: String
@@ -16,7 +16,7 @@ public struct PlayerMove: Identifiable, Hashable, Codable {
 }
 
 public struct BossCard: Identifiable, Hashable, Codable {
-    public let id = UUID()
+    public var id = UUID()
     public var name: String
     public var description: String
     
